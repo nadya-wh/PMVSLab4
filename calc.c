@@ -141,7 +141,6 @@ static int __init calc_init(void) {
 	misc_register(&second_dev);
 	misc_register(&operation_dev);
 	misc_register(&result_dev);
-	printk(KERN_ALERT "Calc loaded!");
 	return 0;
 }
 
@@ -153,7 +152,6 @@ static void __exit calc_exit(void) {
 	misc_deregister(&second_dev);
 	misc_deregister(&operation_dev);
 	misc_deregister(&result_dev);
-	printk(KERN_ALERT "Calc unloaded!");
 }
 
 module_init (calc_init);
