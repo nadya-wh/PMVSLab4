@@ -4,14 +4,60 @@
 #include <linux/miscdevice.h>
 #include <linux/fs.h>
 #include <linux/init.h>
+#include <linux/slab.h>
+#include <asm/uaccess.h>
 
-int first = 9;
-int second = 6;
-char operation = '*';
+MODULE_LICENSE("GPL");
 
-static int calc(struct seq_file* m, void* v) 
+static long first = 9;
+static long second = 6;
+static long result = 0;
+static char operation = '*';
+
+static int already_sent = 0;
+
+
+static char *msg = NULL;
+
+
+static ssize_t first_write(struct file *file, const char *buf, size_t count, loff_t *data)
 {
-	int result = 0;
+	memset(msg, 0, 32);
+	copy_from_user(msg, buf, count);
+
+	printk("first_write_before_kstrtol, %ld\n", first);
+	kstrtol(msg, 10, &first);
+	printk("first_write_after_kstrtol, %ld\n", first);
+
+	return count;
+}
+
+static ssize_t second_write(struct file *file, const char *buf, size_t count, loff_t *data)
+{
+	memset(msg, 0, 32);
+	copy_from_user(msg, buf, count);
+
+	printk("second_write_before_kstrtol, %ld\n", second);
+	kstrtol(msg, 10, &second);
+	printk("second_write_after_kstrtol, %ld\n", second);
+
+	return count;
+}
+
+static ssize_t operation_write(struct file *file, const char *buf, size_t count, loff_t *data)
+{
+	memset(msg, 0, 32);
+	copy_from_user(msg, buf, count);
+
+	printk("operation_write\n");
+	operation = msg[0];
+
+	return count;
+}
+
+static ssize_t my_read(struct file *filp, char *buff, size_t len, loff_t *off)
+{
+	printk("first: %ld, second: %ld\n", first, second);
 	switch(operation) {
 	case '+': 
 		result = first + second;
@@ -26,45 +72,20 @@ static int calc(struct seq_file* m, void* v)
 		if (second != 0) {
 			result = first / second;		
 		} else {
-			seq_printf(m, "Division by zero\n");
-			return 0;
+			result = -1;
 		}
 		break;
 	}
-	seq_printf(m, "%d\n", result);
-	return 0;
+	memset(msg, 0, 32);
+	snprintf(msg, 32, "%ld\n", result);
+	copy_to_user(buff, msg, len);
+	if(already_sent) {
+		already_sent = 0;
+		return 0;
+	}
+	already_sent = 1;
+	return 32;
 }
-
-static ssize_t first_write(struct file *file, const char *buf, size_t count, loff_t *data)
-{
-	printk("first_write\n");
-	int i;
-	for(i = 0, first = 0; i < count - 1; i++)
-		first = first * 10 + buf[i] - '0';
-	return count;
-}
-
-static ssize_t second_write(struct file *file, const char *buf, size_t count, loff_t *data)
-{
-	printk("second_write\n");
-	int i;
-	for(i = 0, second = 0; i < count - 1; i++)
-		second = second * 10 + buf[i] - '0';
-	return count;
-}
-
-static ssize_t operation_write(struct file *file, const char *buf, size_t count, loff_t *data)
-{
-	printk("operation_write\n");
-	operation = buf[0];
-	return count;
-}
-
-static int result_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, calc, NULL);
-}
-
 
 static const struct file_operations first_fops = {
 	.owner = THIS_MODULE,
@@ -74,19 +95,16 @@ static const struct file_operations first_fops = {
 static const struct file_operations second_fops = {
 	.owner = THIS_MODULE, 
 	.write = second_write,
-	.read = seq_read
 };
 
 static const struct file_operations operation_fops = {
 	.owner = THIS_MODULE, 
 	.write = operation_write,
-	.read = seq_read,
 };
 
 static const struct file_operations result_fops = {
 	.owner = THIS_MODULE, 
-	.open = result_open, 
-	.read = seq_read,
+	.read = my_read,
 };
 
 
@@ -115,21 +133,28 @@ static struct miscdevice result_dev = {
 };
 
 static int __init calc_init(void) {
+	msg = (char *)kmalloc(32, GFP_KERNEL);
+	if(msg != NULL)
+		printk("malloc allocator address: 0x%p\n", msg);
+
 	misc_register(&first_dev);
 	misc_register(&second_dev);
 	misc_register(&operation_dev);
 	misc_register(&result_dev);
+	printk(KERN_ALERT "Calc loaded!");
 	return 0;
 }
 
 static void __exit calc_exit(void) {
+	if(msg)
+		kfree(msg);
+
 	misc_deregister(&first_dev);
 	misc_deregister(&second_dev);
 	misc_deregister(&operation_dev);
 	misc_deregister(&result_dev);
+	printk(KERN_ALERT "Calc unloaded!");
 }
 
-MODULE_LICENSE("GPL");
-MODULE_VERSION("dev");
 module_init (calc_init);
 module_exit (calc_exit);

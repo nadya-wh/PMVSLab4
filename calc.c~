@@ -1,0 +1,173 @@
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
+#include <linux/miscdevice.h>
+#include <linux/fs.h>
+#include <asm/uaccess.h>
+#include <linux/mutex.h>	
+#include <linux/sched.h>
+
+
+static int first = 9;
+static int second = 6;
+static char operation = '*';
+
+
+struct buffer {
+	wait_queue_head_t read_queue;
+	struct mutex lock;
+	char *data, *end;
+	char *read_ptr;
+	unsigned long size;
+};
+
+
+static int calc(struct seq_file* m, void* v) 
+{
+	int result = 0;
+	switch(operation) {
+	case '+': 
+		result = first + second;
+		break;
+	case '-':
+		result = first - second;
+		break;
+	case '*':
+		result = first * second;
+		break;
+	case '/':
+		if (second != 0) {
+			result = first / second;		
+		} else {
+			seq_printf(m, "Division by zero\n");
+			return 0;
+		}
+		break;
+	}
+	seq_printf(m, "%d\n", result);
+	return 0;
+}
+
+static ssize_t first_write(struct file *file, const char *buff, size_t count, loff_t *data)
+{
+	struct buffer *buf = file->private_data;
+	int i;
+	char msg[32];
+	if (mutex_lock_interruptible(&buf->lock)) {
+		return -ERESTARTSYS;
+	}
+	copy_from_user( msg, buff, count );
+	for(i = 0, first = 0; i < count - 1; i++)
+		first = first * 10 + msg[i] - '0';
+	printk("first_write\n");
+	mutex_unlock(&buf->lock);
+	return count;
+}
+
+static ssize_t second_write(struct file *file, const char *buff, size_t count, loff_t *data)
+{
+	struct buffer *buf = file->private_data;
+	int i;
+	char msg[32];
+	if (mutex_lock_interruptible(&buf->lock)) {
+		return -ERESTARTSYS;
+	}
+	copy_from_user( msg, buff, count );
+	for(i = 0, second = 0; i < count - 1; i++)
+		second = second * 10 + msg[i] - '0';
+	printk("second_write\n");
+	mutex_unlock(&buf->lock);
+	return count;
+}
+
+static ssize_t operation_write(struct file *file, const char *buff, size_t count, loff_t *data)
+{
+	char msg[32];
+	struct buffer *buf = file->private_data;
+	if (mutex_lock_interruptible(&buf->lock)) {
+		return -ERESTARTSYS;
+	}
+	copy_from_user( msg, buff, count );
+	printk("operation_write\n");
+	operation = msg[0];
+	mutex_unlock(&buf->lock);
+	return count;
+}
+
+static int result_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, calc, NULL);
+}
+
+
+
+
+static const struct file_operations first_fops = {
+	.owner = THIS_MODULE,
+	.write = first_write,
+};
+
+static const struct file_operations second_fops = {
+	.owner = THIS_MODULE, 
+	.write = second_write,
+};
+
+static const struct file_operations operation_fops = {
+	.owner = THIS_MODULE, 
+	.write = operation_write,
+};
+
+static const struct file_operations result_fops = {
+	.owner = THIS_MODULE, 
+	.open = result_open, 
+	.read = seq_read,
+};
+
+
+static struct miscdevice first_dev = {
+	MISC_DYNAMIC_MINOR, 
+	"first", 
+	&first_fops
+};
+
+static struct miscdevice second_dev = {
+	MISC_DYNAMIC_MINOR, 
+	"second", 
+	&second_fops
+};
+
+static struct miscdevice operation_dev = {
+	MISC_DYNAMIC_MINOR, 
+	"operation", 
+	&operation_fops
+};
+
+static struct miscdevice result_dev = {
+	MISC_DYNAMIC_MINOR, 
+	"result", 
+	&result_fops
+};
+
+static int __init calc_init(void) {
+	misc_register(&first_dev);
+	misc_register(&second_dev);
+	misc_register(&operation_dev);
+	misc_register(&result_dev);
+	printk("Devices registered!");
+	return 0;
+}
+
+static void __exit calc_exit(void) {
+	misc_deregister(&first_dev);
+	misc_deregister(&second_dev);
+	misc_deregister(&operation_dev);
+	misc_deregister(&result_dev);
+	printk("Devices deregistered!");
+}
+
+MODULE_LICENSE("GPL");
+MODULE_VERSION("dev");
+MODULE_AUTHOR("NADYA");
+module_init (calc_init);
+module_exit (calc_exit);
